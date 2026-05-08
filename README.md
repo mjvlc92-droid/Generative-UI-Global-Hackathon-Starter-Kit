@@ -87,24 +87,26 @@ Prefer a different model (OpenAI, Anthropic, Ollama)? See [**Switching to a diff
 
 ### Switching to a different model
 
-This kit ships **Gemini 3.1 Flash-Lite + deepagents** as the default. Three
-pre-wired runtimes are selectable via the `AGENT_RUNTIME` env var — no code
-edit needed:
+This kit ships **Gemini 3.1 Flash-Lite + deepagents** as the default. Two
+pre-wired Gemini runtimes are selectable via the `AGENT_RUNTIME` env var —
+no code edit needed:
 
-| `AGENT_RUNTIME`              | Model                   | Planner               |
-|------------------------------|-------------------------|-----------------------|
-| `gemini-flash-deep`          | `gemini-3.1-flash-lite` | `deepagents`          |
-| `gemini-flash-react`         | `gemini-3.1-flash-lite` | `langchain.create_agent` (react) |
-| `claude-sonnet-4-6-react`    | `claude-sonnet-4-6`     | `langchain.create_agent` (react) |
+| `AGENT_RUNTIME`        | Model                   | Planner                          |
+|------------------------|-------------------------|----------------------------------|
+| `gemini-flash-deep`    | `gemini-3.1-flash-lite` | `deepagents`                     |
+| `gemini-flash-react`   | `gemini-3.1-flash-lite` | `langchain.create_agent` (react) |
 
 Set in **both** `.env` and `agent/.env` (the agent reads its own copy):
 
 ```bash
 AGENT_RUNTIME=gemini-flash-deep
-
-# Required for the Claude runtime only:
-# ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+A third runtime (`claude-sonnet-4-6-react`) is also wired in
+[`agent/src/runtime.py`](agent/src/runtime.py) (`_build_claude_react`) if
+you'd rather run Claude — set `ANTHROPIC_API_KEY` in `agent/.env` and flip
+`AGENT_RUNTIME` to it. Use it as a template for any other LangChain
+provider.
 
 Restart the agent (`npm run dev:agent`) and you should see
 `[runtime] AGENT_RUNTIME=...` in the agent log.
