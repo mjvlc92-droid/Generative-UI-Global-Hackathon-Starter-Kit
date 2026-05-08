@@ -53,7 +53,7 @@ const LeadPipelineWidget: React.FC = () => {
     segments.filter((s) => s.leadIds.includes(id));
 
   return (
-    <Frame leads={leads} view="pipeline">
+    <Frame leads={leads}>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {STATUSES.map((s) => {
           const list = groups[s] ?? [];

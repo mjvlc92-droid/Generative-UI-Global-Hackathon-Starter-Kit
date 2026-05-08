@@ -4,7 +4,6 @@ import { optInRate, topWorkshop, toolUsage, workshopClass } from "../lib/leads/d
 
 interface FrameProps {
   leads: Lead[];
-  view: "list" | "demand" | "pipeline";
   children: React.ReactNode;
 }
 
@@ -13,7 +12,7 @@ interface FrameProps {
  * tiles. Mirrors the surface shown in the Next.js app so the widgets read as
  * the same product when surfaced inside Claude/ChatGPT.
  */
-export function Frame({ leads, view: _view, children }: FrameProps) {
+export function Frame({ leads, children }: FrameProps) {
   const opt = optInRate(leads);
   const top = topWorkshop(leads);
   const tools = toolUsage(leads);

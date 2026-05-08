@@ -43,7 +43,7 @@ const LeadDemandWidget: React.FC = () => {
   const tech = techLevelBreakdown(leads);
 
   return (
-    <Frame leads={leads} view="demand">
+    <Frame leads={leads}>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <Section
           title="Workshop demand"

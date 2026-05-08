@@ -41,7 +41,7 @@ const LeadListWidget: React.FC = () => {
     : SAMPLE_SEGMENTS;
 
   return (
-    <Frame leads={leads} view="list">
+    <Frame leads={leads}>
       <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
         <table className="min-w-full text-sm">
           <thead className="bg-neutral-50 text-left text-[11px] uppercase tracking-wide text-neutral-500 dark:bg-neutral-900/40 dark:text-neutral-400">
