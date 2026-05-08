@@ -156,6 +156,97 @@ def fetch_notion_leads(
 
 
 @tool
+def find_lead(
+    query: Annotated[
+        str,
+        "A name (or partial name) to look up in state.leads. Case-insensitive. "
+        "Examples: 'ethan moore', 'ethan', 'moore', 'Devon'.",
+    ],
+    state: Annotated[Dict[str, Any], InjectedState] = None,
+) -> str:
+    """Look up the real lead id for a name from state.leads.
+
+    Use this BEFORE calling selectLead / update_notion_lead / renderEmailDraft
+    when you only have a name. NEVER fabricate ids like
+    "<name>-id-placeholder" — they don't exist in state.leads, so selectLead
+    will silently set selectedLeadId to a non-existent id and the modal will
+    not open. Always resolve the real id through this tool.
+
+    Returns a JSON string:
+      - on a single match: {"match": {id, name, role, company, email}}
+      - on multiple matches: {"matches": [<top 5>], "hint": "ask user to disambiguate"}
+      - on no match: {"matches": [], "hint": "no leads matched <query>"}
+      - on empty state: {"error": "no leads loaded — call fetch_notion_leads first"}
+    """
+    leads_raw = (state or {}).get("leads") or []
+    leads: List[Dict[str, Any]] = [
+        l for l in leads_raw if isinstance(l, dict) and l.get("id")
+    ]
+    if not leads:
+        return json.dumps(
+            {
+                "error": (
+                    "no leads loaded — call fetch_notion_leads(database_id='') "
+                    "first, then retry."
+                )
+            }
+        )
+
+    q = (query or "").strip().lower()
+    if not q:
+        return json.dumps({"matches": [], "hint": "query was empty"})
+
+    # Score: exact name = 3, full-name contains query = 2, any token starts with
+    # query = 1, otherwise 0. Tie-broken by which appears earlier in state.leads.
+    scored: list[tuple[int, int, Dict[str, Any]]] = []
+    for idx, lead in enumerate(leads):
+        name = str(lead.get("name") or "").lower()
+        if not name:
+            continue
+        if name == q:
+            score = 3
+        elif q in name:
+            score = 2
+        elif any(tok.startswith(q) for tok in name.split()):
+            score = 1
+        else:
+            score = 0
+        if score > 0:
+            scored.append((score, -idx, lead))
+
+    if not scored:
+        return json.dumps(
+            {
+                "matches": [],
+                "hint": f"no leads matched {query!r}. Names are stored as 'First Last'.",
+            }
+        )
+
+    scored.sort(reverse=True)
+    top_score = scored[0][0]
+    best = [l for s, _, l in scored if s == top_score]
+
+    def _slim(l: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": l.get("id"),
+            "name": l.get("name"),
+            "role": l.get("role"),
+            "company": l.get("company"),
+            "email": l.get("email"),
+        }
+
+    if len(best) == 1:
+        return json.dumps({"match": _slim(best[0])}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "matches": [_slim(l) for l in best[:5]],
+            "hint": "multiple matches — ask the user which one they meant.",
+        },
+        ensure_ascii=False,
+    )
+
+
+@tool
 def default_notion_database_id() -> str:
     """Return the configured Notion DB id, or a local-store sentinel.
 
@@ -431,6 +522,7 @@ def load_notion_tools() -> List[Any]:
 
     Always includes:
     - `fetch_notion_leads`        (Command(update=) — see issue 006)
+    - `find_lead`                 (state.leads name → real id resolver)
     - `default_notion_database_id`
     - `notion_health_check`
     - `update_notion_lead`        (phase 04 — Command(update=) write-back)
@@ -442,6 +534,7 @@ def load_notion_tools() -> List[Any]:
     """
     tools: List[Any] = [
         fetch_notion_leads,
+        find_lead,
         default_notion_database_id,
         notion_health_check,
         update_notion_lead,

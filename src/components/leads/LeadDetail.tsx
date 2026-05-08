@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
-import { Mail, Phone, MessageSquare, X } from "lucide-react";
+import { useState } from "react";
+import {
+  CheckCircle2,
+  ExternalLink,
+  Mail,
+  MessageSquare,
+  MessageSquarePlus,
+  Phone,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
 import type { Lead, Segment } from "@/lib/leads/types";
 import { STATUSES, TECH_LEVELS, WORKSHOPS } from "@/lib/leads/types";
 import {
@@ -18,6 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { NotionLink } from "./LeadCard";
 
 interface LeadDetailProps {
@@ -42,21 +58,80 @@ export function LeadDetail({
   onEdit,
   syncing,
 }: LeadDetailProps) {
-  useEffect(() => {
-    if (!lead) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lead, onClose]);
+  // The modal must coexist with the CopilotKit chat sidebar — the user
+  // needs to be able to type in chat while the profile is open. Radix
+  // Dialog defaults to `modal={true}`, which (a) traps focus inside the
+  // dialog (chat input becomes unfocusable), (b) treats every outside
+  // pointer-down as a close trigger (clicking into chat dismisses), and
+  // (c) renders a dimmed backdrop that blocks clicks underneath. We turn
+  // all of that off here so the panel behaves like a floating sticky
+  // popup: stays open while the user works elsewhere, dismissed only via
+  // Escape or the explicit X button. `onOpenAutoFocus.preventDefault()`
+  // also keeps the chat input's focus when the agent calls selectLead
+  // mid-typing.
+  return (
+    <Dialog
+      open={!!lead}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      modal={false}
+    >
+      <DialogContent
+        className="max-w-md gap-0 overflow-hidden p-0 sm:max-w-md"
+        showCloseButton={false}
+        showOverlay={false}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        {lead ? (
+          <>
+            <DialogTitle className="sr-only">{lead.name}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Lead profile for {lead.name}
+              {lead.company ? ` at ${lead.company}` : ""}
+            </DialogDescription>
+            <LeadProfileBody
+              lead={lead}
+              segments={segments}
+              onEdit={onEdit}
+              syncing={syncing}
+              onClose={onClose}
+            />
+          </>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-  if (!lead) return null;
-
+/**
+ * The visual contents of the lead profile modal. Pulled out of the
+ * `LeadDetail` shell so the /components review page can render it inline
+ * without owning the `Dialog` lifecycle.
+ *
+ * `onClose` is optional: the /components static preview renders this body
+ * outside a Dialog and has nothing to dismiss, so the X button is hidden
+ * when no callback is provided.
+ */
+export function LeadProfileBody({
+  lead,
+  segments,
+  onEdit,
+  syncing,
+  onClose,
+}: {
+  lead: Lead;
+  segments: Segment[];
+  onEdit?: (leadId: string, patch: Partial<Lead>) => void;
+  syncing?: boolean;
+  onClose?: () => void;
+}) {
   const memberOf = segments.filter((s) => s.leadIds.includes(lead.id));
 
   return (
-    <aside className="fixed inset-y-0 right-[420px] z-30 flex w-[380px] max-w-[90vw] flex-col border-l border-border bg-background shadow-xl">
+    <div className="flex flex-col">
       <header className="flex items-start justify-between gap-3 border-b border-border p-4">
         <div className="flex min-w-0 items-start gap-3">
           <Avatar name={lead.name} />
@@ -68,17 +143,19 @@ export function LeadDetail({
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Close"
-        >
-          <X className="size-4" />
-        </button>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        ) : null}
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="max-h-[70vh] overflow-y-auto p-4">
         <div className="space-y-4">
           <section className="flex flex-wrap gap-1.5">
             <span
@@ -289,16 +366,226 @@ export function LeadDetail({
         </div>
       </div>
 
-      <footer className="flex items-center justify-between border-t border-border p-3">
-        <NotionLink url={lead.url} />
-        <a
-          href={`mailto:${lead.email}`}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Mail className="size-3.5" /> Compose email
-        </a>
-      </footer>
-    </aside>
+      <NotionCommentFooter lead={lead} />
+    </div>
+  );
+}
+
+/**
+ * Demo-only "post comment to Notion" composer that replaces the original
+ * `mailto:` button. Local state, no real Notion call — the modal stays
+ * frontend-only here so the lead-triage demo can show the round-trip
+ * affordance without wiring a Notion comment endpoint through the BFF.
+ *
+ * If you wire this up for real, the natural plumbing is a new agent tool
+ * (e.g. `comment_on_notion_lead`) sitting next to `update_notion_lead`
+ * in `agent/src/notion_tools.py`, with a thin frontend handler that
+ * injects the user's prompt and lets the agent post the comment via the
+ * Notion MCP `notion-create-comment` tool.
+ */
+type FooterPhase = "idle" | "drafting" | "review" | "posting" | "done";
+
+interface DraftEmail {
+  subject: string;
+  body: string;
+}
+
+/**
+ * Build a deterministic draft email for the demo. In production this is
+ * where you'd hand off to the agent — e.g. injectPrompt(`Draft a follow-up
+ * email to ${lead.name}`) — and pipe the result back into `setDraft`.
+ */
+function makeDraftEmail(lead: Lead): DraftEmail {
+  const firstName = lead.name.split(" ")[0] || lead.name;
+  const subject = lead.workshop
+    ? `${lead.workshop} workshop — next steps for ${firstName}`
+    : `Quick follow-up — next steps for ${firstName}`;
+  const interests = lead.interested_in?.length
+    ? lead.interested_in.slice(0, 3).join(", ")
+    : "the topics you flagged when you signed up";
+  const company = lead.company ? ` from ${lead.company}` : "";
+  const body = `Hi ${firstName},
+
+Thanks for signing up for the ${lead.workshop} track${company}. I noticed you're interested in ${interests} — happy to share a tighter agenda once we have your slot locked.
+
+Could you share a couple of times this week that work? Even a 15-minute call helps me line up the right preflight materials.
+
+Talk soon,
+The team`;
+  return { subject, body };
+}
+
+function notionFallbackUrl(lead: Lead): string {
+  return lead.url ?? `https://www.notion.so/?lead=${encodeURIComponent(lead.id)}`;
+}
+
+/**
+ * Demo HITL flow: click → agent drafts an email → user reviews + edits →
+ * approve → simulated Notion comment write → success state with deep
+ * link back to the lead's Notion page.
+ *
+ * Why HITL here: posting to a customer-facing Notion page is irreversible
+ * (you can't unsay a comment), which is exactly the SendQueueModal /
+ * useInterrupt pattern's domain. We mirror the soft-edit + hard-approve
+ * shape locally so the demo doesn't depend on a real agent round-trip.
+ *
+ * For the production wiring: replace `makeDraftEmail` with an agent
+ * `draft_lead_followup` tool, and replace the simulated post with a
+ * `comment_on_notion_lead` tool that calls Notion MCP `create-comment`
+ * and returns the resulting page URL into `setNotionUrl`.
+ */
+function NotionCommentFooter({ lead }: { lead: Lead }) {
+  const [phase, setPhase] = useState<FooterPhase>("idle");
+  const [draft, setDraft] = useState<DraftEmail>({ subject: "", body: "" });
+  const [notionUrl, setNotionUrl] = useState<string | null>(null);
+
+  const startDraft = async () => {
+    setPhase("drafting");
+    // Simulate the agent drafting time so the UI shows the work.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setDraft(makeDraftEmail(lead));
+    setPhase("review");
+  };
+
+  const cancel = () => {
+    setPhase("idle");
+    setDraft({ subject: "", body: "" });
+  };
+
+  const approveAndPost = async () => {
+    if (!draft.subject.trim() || !draft.body.trim()) return;
+    setPhase("posting");
+    // Simulated Notion round-trip — keeps the demo standalone.
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const url = notionFallbackUrl(lead);
+    setNotionUrl(url);
+    setPhase("done");
+    toast.success(`Comment posted on ${lead.name}'s Notion page`, {
+      action: {
+        label: "View",
+        onClick: () => window.open(url, "_blank", "noopener,noreferrer"),
+      },
+    });
+  };
+
+  return (
+    <footer className="border-t border-border">
+      {phase === "idle" ? (
+        <div className="flex items-center justify-between p-3">
+          <NotionLink url={lead.url} />
+          <button
+            type="button"
+            onClick={startDraft}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Sparkles className="size-3.5" /> Draft & post comment
+          </button>
+        </div>
+      ) : null}
+
+      {phase === "drafting" ? (
+        <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
+          <Sparkles className="size-3.5 animate-pulse text-primary" />
+          Drafting follow-up email for {lead.name}…
+        </div>
+      ) : null}
+
+      {phase === "review" || phase === "posting" ? (
+        <div className="space-y-2 p-3">
+          <div className="flex items-center justify-between">
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Sparkles className="size-3 text-primary" /> Draft email · review
+              before posting
+            </span>
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-300">
+              awaiting approval
+            </span>
+          </div>
+          <input
+            value={draft.subject}
+            onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))}
+            disabled={phase === "posting"}
+            placeholder="Subject"
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+          />
+          <textarea
+            value={draft.body}
+            onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+            disabled={phase === "posting"}
+            rows={6}
+            className="w-full resize-none rounded-md border border-border bg-background p-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              On approval, this draft is posted as a comment on{" "}
+              {lead.name}&apos;s Notion page.
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={cancel}
+                disabled={phase === "posting"}
+                className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={approveAndPost}
+                disabled={
+                  phase === "posting" ||
+                  !draft.subject.trim() ||
+                  !draft.body.trim()
+                }
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                <MessageSquarePlus className="size-3.5" />
+                {phase === "posting" ? "Posting…" : "Approve & post"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {phase === "done" ? (
+        <div className="flex items-center justify-between gap-3 bg-emerald-500/5 p-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium text-foreground">
+                Comment posted on Notion
+              </div>
+              <div className="truncate text-[10px] text-muted-foreground">
+                {draft.subject}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {notionUrl ? (
+              <a
+                href={notionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                <ExternalLink className="size-3.5" /> View on Notion
+              </a>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setPhase("idle");
+                setDraft({ subject: "", body: "" });
+                setNotionUrl(null);
+              }}
+              className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </footer>
   );
 }
 

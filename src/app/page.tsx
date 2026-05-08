@@ -133,6 +133,193 @@ function StreamingChip({ label }: { label: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Live state subscription for inline-in-chat tool renderers
+// ---------------------------------------------------------------------------
+//
+// `useFrontendTool({ render })` v2 registers the render closure inside a
+// useEffect whose deps don't include the closure itself (see
+// @copilotkit/react-core/v2/hooks/use-frontend-tool.tsx). That means the
+// renderer captures the FIRST-MOUNT scope — when `agent.state` is still
+// undefined and `state.leads` is `[]` from `initialState`. The chat panel
+// keeps replaying that stale closure even after the agent imports leads,
+// which is why questions like "what's the most popular workshop?" rendered
+// `<DemandSpark leads={[]} />` and showed "No leads loaded yet" despite the
+// 50-lead pipeline being visible right next to the chat.
+//
+// The fix: keep the registered render trivial (`() => <LiveX />`) and have
+// the wrapper component subscribe to agent state via `useAgent()` itself.
+// `useAgent` issues a `forceUpdate` on `OnStateChanged`, so the wrapper
+// re-renders on every state mutation and reads fresh `agent.state` each
+// time. No closure capture, no stale leads.
+function mergeAgentState(raw: unknown): AgentState {
+  const partial =
+    raw && typeof raw === "object" ? (raw as Partial<AgentState>) : {};
+  return {
+    ...initialState,
+    ...partial,
+    filter: { ...initialState.filter, ...(partial.filter ?? {}) },
+    header: { ...initialState.header, ...(partial.header ?? {}) },
+    sync: { ...initialState.sync, ...(partial.sync ?? {}) },
+    leads: partial.leads ?? initialState.leads,
+    segments: partial.segments ?? initialState.segments,
+    highlightedLeadIds:
+      partial.highlightedLeadIds ?? initialState.highlightedLeadIds,
+    enrichment: {
+      ...initialState.enrichment,
+      ...(partial.enrichment ?? {}),
+      perLead:
+        partial.enrichment?.perLead ?? initialState.enrichment.perLead,
+    },
+  };
+}
+
+function useLiveAgentState() {
+  const { agent } = useAgent();
+  const state = mergeAgentState(agent?.state);
+  const setState = (updater: (prev: AgentState) => AgentState) => {
+    agent?.setState(updater(mergeAgentState(agent?.state)));
+  };
+  return { agent, state, setState };
+}
+
+function LiveDemandSpark() {
+  const { state } = useLiveAgentState();
+  return <DemandSpark leads={state.leads} />;
+}
+
+function LiveEnrichmentStream() {
+  const { state, setState } = useLiveAgentState();
+  return (
+    <div className="my-2 max-w-[400px]">
+      <EnrichmentStream
+        state={state.enrichment}
+        leads={state.leads}
+        columns={5}
+        onCellClick={(id) =>
+          setState((prev) => ({ ...prev, selectedLeadId: id }))
+        }
+      />
+    </div>
+  );
+}
+
+function LiveEnrichmentPill() {
+  const { state } = useLiveAgentState();
+  return (
+    <div className="my-2">
+      <EnrichmentPill state={state.enrichment} total={state.leads.length} />
+    </div>
+  );
+}
+
+/**
+ * Mirror of the inner-CanvasInner `injectPrompt`. Recreated at module
+ * level so wrapper components rendered inside the chat panel can drive
+ * follow-up agent runs (Regenerate / Queue actions on EmailDraftCard)
+ * without closing over CanvasInner's render scope.
+ */
+function useInjectPrompt() {
+  const { agent } = useAgent();
+  const { copilotkit } = useCopilotKit();
+  return (prompt: string) => {
+    if (!agent) return;
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `msg-${Date.now()}`;
+    agent.addMessage({ id, role: "user", content: prompt });
+    void copilotkit.runAgent({ agent }).catch((error: unknown) => {
+      // Mirror CanvasInner's behavior: surface the error in the console
+      // but don't crash the chat tree. Toast surfacing only happens in
+      // CanvasInner where the Sonner Toaster is mounted.
+      // eslint-disable-next-line no-console
+      console.error("injectPrompt: runAgent failed", error);
+    });
+  };
+}
+
+interface LiveLeadRadarArgs {
+  leadId?: string;
+  leadName?: string;
+  tier?: (typeof TIER_VALUES)[number];
+  score?: number;
+  axes?: {
+    copilotKitFit: number;
+    langChainFit: number;
+    agenticUiInterest: number;
+    productionReadiness: number;
+    decisionMakerScore: number;
+  };
+}
+
+function LiveLeadRadar({ args }: { args: LiveLeadRadarArgs }) {
+  const { state } = useLiveAgentState();
+  if (!args.axes) return <StreamingChip label="Drawing radar…" />;
+  return (
+    <div className="my-2">
+      <LeadRadar
+        leadName={
+          args.leadName ??
+          state.leads.find((l) => l.id === args.leadId)?.name
+        }
+        tier={args.tier}
+        score={args.score}
+        axes={args.axes}
+      />
+    </div>
+  );
+}
+
+interface LiveEmailDraftArgs {
+  leadId?: string;
+  leadName?: string;
+  leadEmail?: string;
+  leadCompany?: string;
+  leadRole?: string;
+  draft?: {
+    subject: string;
+    body: string;
+    tone: (typeof TONE_VALUES)[number];
+    rationale?: string;
+  };
+}
+
+function LiveEmailDraft({ args }: { args: LiveEmailDraftArgs }) {
+  const { state } = useLiveAgentState();
+  const injectPrompt = useInjectPrompt();
+  if (!args.leadId || !args.draft) {
+    return <StreamingChip label="Drafting email…" />;
+  }
+  // Prefer live state over the args-bag so the card always shows the
+  // current company / role even if the agent only echoed leadId.
+  const fromState = state.leads.find((l) => l.id === args.leadId);
+  const lead = fromState ?? {
+    id: args.leadId,
+    name: args.leadName ?? "(unknown lead)",
+    email: args.leadEmail ?? "",
+    company: args.leadCompany ?? "",
+    role: args.leadRole ?? "",
+  };
+  return (
+    <EmailDraftCard
+      lead={lead}
+      draft={args.draft}
+      variant="compact"
+      onRegenerate={() =>
+        injectPrompt(
+          `Regenerate the outreach email for ${lead.name} (id ${lead.id}).`,
+        )
+      }
+      onQueue={() =>
+        injectPrompt(
+          `Queue the email for ${lead.name} (id ${lead.id}) into the send queue.`,
+        )
+      }
+    />
+  );
+}
+
 function CanvasInner() {
   const { agent } = useAgent();
   const { copilotkit } = useCopilotKit();
@@ -239,32 +426,10 @@ function CanvasInner() {
     };
   }, []);
 
-  const mergeState = (raw: unknown): AgentState => {
-    const partial =
-      raw && typeof raw === "object" ? (raw as Partial<AgentState>) : {};
-    return {
-      ...initialState,
-      ...partial,
-      filter: { ...initialState.filter, ...(partial.filter ?? {}) },
-      header: { ...initialState.header, ...(partial.header ?? {}) },
-      sync: { ...initialState.sync, ...(partial.sync ?? {}) },
-      leads: partial.leads ?? initialState.leads,
-      segments: partial.segments ?? initialState.segments,
-      highlightedLeadIds:
-        partial.highlightedLeadIds ?? initialState.highlightedLeadIds,
-      enrichment: {
-        ...initialState.enrichment,
-        ...(partial.enrichment ?? {}),
-        perLead:
-          partial.enrichment?.perLead ?? initialState.enrichment.perLead,
-      },
-    };
-  };
-
-  const state = mergeState(agent?.state);
+  const state = mergeAgentState(agent?.state);
 
   const updateState = (updater: (prev: AgentState) => AgentState) => {
-    agent?.setState(updater(mergeState(agent?.state)));
+    agent?.setState(updater(mergeAgentState(agent?.state)));
   };
 
   // ----- Frontend tools (the agent's surface) ---------------------------
@@ -466,7 +631,7 @@ function CanvasInner() {
     (leadId: string, patch: Partial<Lead>) => {
       // Snapshot from the agent state directly so we always have the
       // server-truth pre-edit shape, not a stale closure copy.
-      const snap = mergeState(agent?.state).leads.find((l) => l.id === leadId);
+      const snap = mergeAgentState(agent?.state).leads.find((l) => l.id === leadId);
       if (!snap) {
         console.warn(`commitLeadEdit: no lead with id=${leadId}`);
         return;
@@ -548,7 +713,7 @@ function CanvasInner() {
         .passthrough(),
     }),
     handler: async ({ leadId, patch }) => {
-      const lead = mergeState(agent?.state).leads.find((l) => l.id === leadId);
+      const lead = mergeAgentState(agent?.state).leads.find((l) => l.id === leadId);
       commitLeadEdit(leadId, patch as Partial<Lead>);
       const fields = Object.keys(patch ?? {}).join(",") || "<no fields>";
       return `queued: editing ${lead?.name ?? leadId} (${fields})`;
@@ -743,7 +908,10 @@ function CanvasInner() {
     description:
       "Render an inline 3-bar mini chart of top-3 workshops by current lead count. Use this when answering ranking / 'what's hot' questions in chat — you do NOT need to setView('demand') if a quick inline summary will do. Takes no args.",
     parameters: z.object({}),
-    render: () => <DemandSpark leads={state.leads} />,
+    // LiveDemandSpark subscribes to agent state itself — see the comment
+    // on `useLiveAgentState` for why a static factory is the only render
+    // shape that survives v2 useFrontendTool's register-once semantics.
+    render: () => <LiveDemandSpark />,
   });
 
   // EnrichmentStream — the long-running pillar's chat surface. The sheet
@@ -755,18 +923,7 @@ function CanvasInner() {
     description:
       "Render the live enrichment grid inline in chat. Use when the user asks about progress, status, or how the run is going. The component reads agent state, so this tool takes no args. Prefer renderEnrichmentPill for a quick one-line answer; reach for this when the user wants to SEE per-lead progress.",
     parameters: z.object({}),
-    render: () => (
-      <div className="my-2 max-w-[400px]">
-        <EnrichmentStream
-          state={state.enrichment}
-          leads={state.leads}
-          columns={5}
-          onCellClick={(id) =>
-            updateState((prev) => ({ ...prev, selectedLeadId: id }))
-          }
-        />
-      </div>
-    ),
+    render: () => <LiveEnrichmentStream />,
   });
 
   // EnrichmentPill — the compact one-line variant. Single sentence: "X / 52
@@ -777,14 +934,7 @@ function CanvasInner() {
     description:
       "Render a compact pill summarizing enrichment progress: '{done} / {total} enriched · {elapsed}'. Use this for one-line status answers in chat where the full grid would be overkill. Takes no args.",
     parameters: z.object({}),
-    render: () => (
-      <div className="my-2">
-        <EnrichmentPill
-          state={state.enrichment}
-          total={state.leads.length}
-        />
-      </div>
-    ),
+    render: () => <LiveEnrichmentPill />,
   });
 
   // ----- Charts / visualizations ---------------------------------------
@@ -812,22 +962,7 @@ function CanvasInner() {
         decisionMakerScore: z.number(),
       }),
     }),
-    render: ({ args }) => {
-      if (!args.axes) return <StreamingChip label="Drawing radar…" />;
-      return (
-        <div className="my-2">
-          <LeadRadar
-            leadName={
-              args.leadName ??
-              state.leads.find((l) => l.id === args.leadId)?.name
-            }
-            tier={args.tier}
-            score={args.score}
-            axes={args.axes}
-          />
-        </div>
-      );
-    },
+    render: ({ args }) => <LiveLeadRadar args={args} />,
   });
 
   useFrontendTool({
@@ -951,36 +1086,7 @@ function CanvasInner() {
         rationale: z.string().optional(),
       }),
     }),
-    render: ({ args }) => {
-      if (!args.leadId || !args.draft) {
-        return <StreamingChip label="Drafting email…" />;
-      }
-      const fromState = state.leads.find((l) => l.id === args.leadId);
-      const lead = fromState ?? {
-        id: args.leadId,
-        name: args.leadName ?? "(unknown lead)",
-        email: args.leadEmail ?? "",
-        company: args.leadCompany ?? "",
-        role: args.leadRole ?? "",
-      };
-      return (
-        <EmailDraftCard
-          lead={lead}
-          draft={args.draft}
-          variant="compact"
-          onRegenerate={() =>
-            injectPrompt(
-              `Regenerate the outreach email for ${lead.name} (id ${lead.id}).`,
-            )
-          }
-          onQueue={() =>
-            injectPrompt(
-              `Queue the email for ${lead.name} (id ${lead.id}) into the send queue.`,
-            )
-          }
-        />
-      );
-    },
+    render: ({ args }) => <LiveEmailDraft args={args} />,
   });
 
   // ----- Hard HITL: send-gate interrupt --------------------------------
@@ -1049,9 +1155,21 @@ function CanvasInner() {
 
   return (
     <>
-      <main
-        className={`flex h-screen flex-col overflow-hidden bg-background px-6 py-5 ${selectedLead ? "pr-[calc(380px+24px)]" : ""}`}
-      >
+      <main className="relative flex h-screen flex-col overflow-hidden bg-background px-6 py-5">
+        {/* Canvas-scoped backdrop dim. The lead profile modal is non-modal
+            (so the user can keep typing in the chat sidebar with it
+            open), which means Radix doesn't render its own dimmed
+            overlay. We paint our own here, scoped to <main> so the chat
+            sidebar (a sibling of main, fixed-positioned at the right
+            edge) and the threads drawer (a different grid column
+            entirely) stay at full brightness. pointer-events-none keeps
+            kanban / list / demand-view clicks working through the dim. */}
+        {selectedLead ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-10 bg-black/40 transition-opacity duration-200"
+          />
+        ) : null}
         <Header
           title={state.header.title}
           subtitle={state.header.subtitle}

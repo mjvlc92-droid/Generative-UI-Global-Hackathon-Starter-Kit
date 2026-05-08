@@ -163,7 +163,17 @@ def _gemini_llm():
 def _build_gemini_deep(
     tools: list, system_prompt: str, middleware: list
 ) -> CompiledStateGraph:
-    """Default: Gemini Flash-Lite + deepagents planner."""
+    """Default: Gemini Flash-Lite + deepagents planner.
+
+    Note on recursion_limit: deepagents' `create_deep_agent` calls
+    `.with_config({recursion_limit: 9_999})` internally, but the
+    @ag-ui/langgraph adapter that the BFF uses opens runs against the
+    LangGraph SDK with its own default (25). The fix lives at the BFF
+    layer (`bff/src/server.ts` — `assistantConfig.recursion_limit`)
+    because that's where the per-run config is actually composed; setting
+    it here would only affect direct `graph.invoke()` paths, not the
+    AG-UI runs the chat sidebar issues.
+    """
     from deepagents import create_deep_agent
 
     llm = _gemini_llm()

@@ -6,9 +6,11 @@ import { useState } from "react";
 import CardRenderer from "@/components/canvas/CardRenderer";
 import { defaultDataFor } from "@/lib/canvas/state";
 import type { Item, ProjectData } from "@/lib/canvas/types";
+import { EmailDraftReview } from "./email-draft-review";
 import { EnrichmentReview } from "./enrichment-review";
 import { ChartsReview } from "./charts-review";
 import { HitlReview } from "./hitl-review";
+import { ProfilePopupReview } from "./profile-popup-review";
 import { RenderToolsReview } from "./render-tools-review";
 import { ToolCallsReview } from "./tool-calls-review";
 
@@ -752,6 +754,8 @@ function CategoryNav() {
     { id: "enrichment", label: "Enrichment stream" },
     { id: "charts", label: "Charts & visualizations" },
     { id: "hitl", label: "HITL surfaces" },
+    { id: "profile-popup", label: "Profile popup" },
+    { id: "email-draft", label: "Email draft" },
     { id: "render-tools", label: "Render tools" },
     { id: "tool-calls", label: "Tool calls" },
   ];
@@ -827,6 +831,14 @@ export default function ComponentsPage() {
 
             <div id="hitl">
               <HitlReview />
+            </div>
+
+            <div id="profile-popup">
+              <ProfilePopupReview />
+            </div>
+
+            <div id="email-draft">
+              <EmailDraftReview />
             </div>
 
             <div id="render-tools">

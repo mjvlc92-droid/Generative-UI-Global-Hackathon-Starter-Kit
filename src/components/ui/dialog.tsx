@@ -50,13 +50,21 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  showOverlay = true,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  /**
+   * Whether to render the dimmed backdrop overlay. Default true. Set to
+   * `false` for non-blocking floating panels (e.g. the lead profile modal,
+   * which needs to coexist with the CopilotKit chat sidebar — the user
+   * must still be able to type in chat with the panel open).
+   */
+  showOverlay?: boolean;
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      {showOverlay ? <DialogOverlay /> : null}
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
