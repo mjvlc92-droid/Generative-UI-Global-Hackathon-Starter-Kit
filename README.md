@@ -1,4 +1,4 @@
-# Generative UI · Global Agents · Agentic Interfaces Hackathon Starter — Notion Lead-Form
+# Generative UI Global Hackathon: Agentic Interfaces Starter Kit
 
 ![Hackathon Banner](public/banner.jpg)
 
@@ -564,4 +564,4 @@ MIT.
 
 ---
 
-> Built for the Generative UI · Global Agents · Agentic Interfaces hackathon.
+> Built for the Generative UI Global Hackathon: Agentic Interfaces.
