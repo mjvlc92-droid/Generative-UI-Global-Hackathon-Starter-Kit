@@ -732,16 +732,29 @@ export function LeadCopilotShell({ mode }: LeadCopilotShellProps) {
     },
   });
 
-  // Open generative UI catch-all.
+  // Open generative UI catch-all. The ignore list matches the
+  // threads-demo: A2UI internal tools are rendered by the A2UI subsystem
+  // (the `openGenerativeUI={{}}` provider config), so the wildcard must
+  // skip them — otherwise the same tool call mounts twice and React
+  // raises duplicate-key warnings on the chat message list.
   useDefaultRenderTool({
-    render: ({ name, status, result, parameters }) => (
-      <ToolFallbackCard
-        name={name}
-        status={status}
-        result={result}
-        parameters={parameters}
-      />
-    ),
+    render: ({ name, status, result, parameters }) => {
+      if (
+        name === "render_a2ui" ||
+        name === "generate_a2ui" ||
+        name === "log_a2ui_event"
+      ) {
+        return <></>;
+      }
+      return (
+        <ToolFallbackCard
+          name={name}
+          status={status}
+          result={result}
+          parameters={parameters}
+        />
+      );
+    },
   });
 
   // ----- Render ---------------------------------------------------------
