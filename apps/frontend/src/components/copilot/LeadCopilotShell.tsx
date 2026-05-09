@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { Toaster, toast } from "sonner";
 import {
@@ -177,6 +178,7 @@ export interface LeadCopilotShellProps {
 export function LeadCopilotShell({ mode }: LeadCopilotShellProps) {
   const { agent } = useAgent();
   const { copilotkit } = useCopilotKit();
+  const router = useRouter();
 
   // ----- localStorage durability ----------------------------------------
   // Hydrate empty state from cache on first mount; persist whenever leads
@@ -187,25 +189,28 @@ export function LeadCopilotShell({ mode }: LeadCopilotShellProps) {
     if (hydratedRef.current) return;
     if (!agent) return;
     const current = mergeAgentState(agent.state);
-    if (current.leads.length > 0) {
-      hydratedRef.current = true;
-      return;
+    // Only attempt to read cache when state is empty; either way, we
+    // mark hydration complete so the auto-navigation effect below can
+    // distinguish "load-time replay" from "fresh import".
+    if (current.leads.length === 0) {
+      try {
+        const raw = window.localStorage.getItem(LEADS_CACHE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.leads && Array.isArray(parsed.leads)) {
+            agent.setState({
+              ...current,
+              leads: parsed.leads,
+              sync: parsed.sync ?? current.sync,
+              header: parsed.header ?? current.header,
+            });
+          }
+        }
+      } catch {
+        // localStorage unavailable / parse error — fall through silently
+      }
     }
-    try {
-      const raw = window.localStorage.getItem(LEADS_CACHE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed?.leads || !Array.isArray(parsed.leads)) return;
-      agent.setState({
-        ...current,
-        leads: parsed.leads,
-        sync: parsed.sync ?? current.sync,
-        header: parsed.header ?? current.header,
-      });
-      hydratedRef.current = true;
-    } catch {
-      // localStorage unavailable / parse error — fall through silently
-    }
+    hydratedRef.current = true;
   }, [agent]);
 
   useEffect(() => {
@@ -225,6 +230,29 @@ export function LeadCopilotShell({ mode }: LeadCopilotShellProps) {
       // quota / disabled — silently skip persistence
     }
   }, [agent, agent?.state]);
+
+  // Auto-promote chat-only mode to canvas mode the first time leads arrive
+  // (e.g. after `Import the leads from Notion.`). The seedRef seeds the
+  // baseline to the post-hydration count so a returning user with cached
+  // leads stays on / instead of getting redirected on every load — only
+  // fresh imports during a session trigger the navigation.
+  const seenLeadsRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (mode !== "chat") return;
+    if (!agent) return;
+    if (!hydratedRef.current) return;
+    const count = mergeAgentState(agent.state).leads.length;
+    if (seenLeadsRef.current === null) {
+      seenLeadsRef.current = count;
+      return;
+    }
+    if (count > 0 && seenLeadsRef.current === 0) {
+      seenLeadsRef.current = count;
+      router.push("/leads");
+      return;
+    }
+    seenLeadsRef.current = count;
+  }, [mode, agent, agent?.state, router]);
 
   // ----- Suggestion chips -----------------------------------------------
 
@@ -829,8 +857,8 @@ function ChatOnlyView({
   threadHasRun: boolean;
 }) {
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <header className="flex shrink-0 items-center justify-between border-b border-[#EDEDF5] bg-background/80 px-6 py-3 backdrop-blur">
+    <div className="flex h-screen flex-col bg-white">
+      <header className="flex shrink-0 items-center justify-between border-b border-[#EDEDF5] bg-white px-6 py-3">
         <div className="flex items-center gap-2 text-foreground">
           <span className="grid size-6 place-items-center rounded-md bg-[#BEC2FF]">
             <MessageCircle size={14} />
@@ -851,11 +879,9 @@ function ChatOnlyView({
         </Link>
       </header>
 
-      <div className="mx-auto flex h-full w-full max-w-3xl flex-1 flex-col overflow-hidden">
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-1 flex-col overflow-hidden bg-white">
         <CopilotChat
           input={{ disclaimer: () => null }}
-          // Empty hint when fresh thread has no leads yet — keeps the
-          // welcome screen visible so suggestion chips drive first action.
           welcomeScreen={!threadHasRun && leadCount === 0 ? true : false}
         />
       </div>
