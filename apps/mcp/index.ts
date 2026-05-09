@@ -15,7 +15,7 @@ const server = new MCPServer({
   version: "1.0.0",
   description:
     "Workshop Lead Triage — visual MCP widgets for the Notion-sourced workshop leads canvas: list, demand, pipeline, dashboard (stats + donut + bars), and a HITL email-draft card.",
-  baseUrl: process.env.MCP_URL || "http://localhost:3001",
+  baseUrl: process.env.MCP_URL || "http://localhost:3011",
   favicon: "favicon.ico",
   websiteUrl: "https://mcp-use.com",
   icons: [
