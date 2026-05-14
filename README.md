@@ -1,208 +1,454 @@
-# Generative UI Global Hackathon: Agentic Interfaces Starter Kit
+# Generative UI Global Hackathon — Agentic Interfaces Starter Kit
 
-![Hackathon Banner](apps/frontend/public/banner.jpg)
+> **Starter kit completo para construir interfaces agénticas con UI generativa.**
 
-Welcome to the **Generative UI Global Hackathon: Agentic Interfaces**! This starter kit gives you a complete AI-powered application with durable conversation threads, an agent-driven canvas, real-world MCP integrations, and a deployable MCP App — wired up with CopilotKit, LangChain Deep Agents, Gemini, A2UI, Notion MCP (via mcp-use), Manufact, and Daytona.
+Una aplicación full-stack funcional que combina un agente LangGraph, un canvas kanban de leads sincronizado por IA, hilos de conversación persistentes (Postgres), integración real con Notion vía MCP, y un servidor MCP desplegable que corre nativo en Claude y ChatGPT.
 
-## About this starter
-
-https://github.com/user-attachments/assets/f2a405c3-3cf4-44c8-bca3-2c8b8e6fed90
-
-This is a starter template for building agentic interfaces using Generative UI. It provides a modern Next.js application with an integrated [LangGraph Deep Agent](https://docs.langchain.com/oss/python/deepagents/overview) that manages a visual canvas of interactive cards with real-time AI synchronization and external tool integrations (a Notion "Leads" database, for this example) through MCP. A second deployable MCP server, built on mcp-use, gives the agent a third surface that runs natively in Claude or ChatGPT.
-
-This is an example application that we built to help you get started quickly. Everything you see can be customized, replaced, augmented, or built upon.
-
-https://github.com/user-attachments/assets/6f44cf84-e485-4c26-8703-481e0c9c2c54
-
-- **Persistent threads.** Every conversation is named, listed in the sidebar, and survives reloads, restarts, and resumes mid-run.
-- **Agent-driven canvas.** Lead cards, follow-up notes, and pipeline charts the AI can create, edit, and organize while you watch.
-- **Real integrations via MCP.** Notion Leads database sync out of the box; swap to any other MCP server with one config edit.
-- **Deployable MCP server.** A third agent surface that runs in Claude or ChatGPT, deployable with one command.
-- **Generative UI primed.** Stream Gemini-rendered components without re-plumbing.
+**Stack:** Next.js 15 · LangChain Deep Agents · CopilotKit · Gemini · Notion MCP · Manufact
 
 ---
 
-## Generative UI
+## Tabla de Contenidos
 
-![Generative UI spectrum: Controlled → Declarative → Open-ended](apps/frontend/public/generative-ui-spectrum-v2.jpg)
-
-"Generative UI" describes any AI-driven interface that the agent **chooses, composes, or writes at runtime**. Approaches sit on a spectrum — from **more control** on one end to **more flexibility** on the other — and most real apps mix several tiers.
-
-### Controlled (`useComponent`)
-
-The highest level of control. The developer provides the agent with a set of predefined React components, and the agent selects the appropriate one and populates it with props. This ensures the interface stays on-brand and pixel-perfect, making it ideal for standard, repeatable application workflows. See [Display Components](https://docs.copilotkit.ai/generative-ui/your-components/display-only) in the CopilotKit docs.
-
-### Declarative (`A2UI`)
-
-Utilizing the [A2UI](https://a2ui.org/) specification, this method uses a schema to map agent outputs to a catalog of renderers. It offers a balance between control and flexibility, allowing the agent to handle more varied UI layouts without requiring a unique tool for every single component. It is particularly effective for the "long tail" of user interactions. See [A2UI](https://docs.copilotkit.ai/generative-ui/a2ui) in the CopilotKit docs.
-
-### Open-ended (`MCP Apps`, `openGenerativeUI`)
-
-The "Wild West" of generative UI — the agent generates raw HTML that is rendered within a secure, sandboxed double-iframe. While it is the most flexible — enabling the creation of disposable, data-grounded interfaces on the fly — it is the hardest to style consistently and can behave unpredictably. See [opengenerativeui.copilotkit.ai](https://opengenerativeui.copilotkit.ai/) for a live demo, and the CopilotKit docs on [MCP Apps](https://docs.copilotkit.ai/generative-ui/mcp-apps) and [Open Generative UI](https://docs.copilotkit.ai/generative-ui/open-generative-ui).
-
-This kit is wired for all three: the canvas surface uses controlled cards for lead entities, A2UI streams declarative components from Gemini, and the deployable MCP server in `apps/mcp/` extends the same agent into Claude and ChatGPT's open-ended generative UI surface.
-
-**Go deeper:**
-
-- 🎥 Talk — [The Generative UI spectrum](https://www.youtube.com/watch?v=y4lln0yGMSE)
-- 📝 Article — [CopilotKit on Generative UI](https://x.com/CopilotKit/status/2047327612163293286)
+1. [Arquitectura General](#arquitectura-general)
+2. [Flujo de Información — Pipeline Completo](#flujo-de-información--pipeline-completo)
+3. [Flujo de Sincronización con Notion](#flujo-de-sincronización-con-notion)
+4. [Flujo HITL — Email Draft con Human-in-the-Loop](#flujo-hitl--email-draft)
+5. [Generative UI — 3 Paradigmas](#generative-ui--3-paradigmas)
+6. [MCP Server Desplegable](#mcp-server-desplegable)
+7. [Stack Técnico](#stack-técnico)
+8. [Estructura del Proyecto](#estructura-del-proyecto)
+9. [Instalación y Setup](#instalación-y-setup)
+10. [Puertos de Referencia](#puertos-de-referencia)
 
 ---
 
-## Stack
+## Arquitectura General
 
-### CopilotKit
+```mermaid
+graph TB
+    subgraph Frontend ["🖥️ Next.js 15 + React 19 (puerto 3010)"]
+        direction LR
+        Sidebar["ThreadsDrawer\nhilos persistentes\n(Postgres-backed)"]
+        Canvas["LeadCanvas\nPipelineBoard · QuickStats\nStatusDonut · WorkshopDemand"]
+        Chat["CopilotSidebar\nchat con el agente"]
+        InlineUI["Inline Generative UI\nLeadMiniCard · EmailDraftCard\nrendereado por el agente en el chat"]
+    end
 
-CopilotKit connects your app's logic, state, and user context to the AI agents that deliver the animated and interactive part of your app experience — across both embedded UIs and fully headless interfaces. The kit ships with **CopilotKit Intelligence** wired in, giving you durable conversation threads (Postgres-backed), a runtime that bridges your frontend to any LangGraph agent, and built-in support for generative UI and MCP App composition.
+    subgraph BFF ["⚙️ Hono BFF (puerto 4010)"]
+        CopilotRuntime["CopilotRuntime v2\nCopilotKitIntelligence\nLangGraphAgent → :8133"]
+        ErrorMiddleware["Error remapping\nPostgres seed\nthread-lock failures"]
+    end
 
-[More about CopilotKit ->](https://docs.copilotkit.ai)
+    subgraph Agent ["🤖 LangGraph Deep Agent Python (puerto 8133)"]
+        MainPy["main.py\nboot: wipe orphan threads\nbuild graph · resolve runtime"]
+        Runtime["runtime.py\nbuild_graph()\n4 runtimes: gemini-deep · gemini-react\nclaude-react · noop"]
+        Prompts["prompts.py\nLEAD_TRIAGE_PROMPT\nbuild_system_prompt()"]
 
-### LangChain Deep Agents
+        subgraph Middleware_ ["Middleware chain"]
+            Timing["TimingMiddleware\nwall-clock logging"]
+            LeadState["LeadStateMiddleware\nauto-hydrate state.leads\nen primer turno"]
+            CopilotMW["CopilotKitMiddleware"]
+        end
 
-LangChain Deep Agents is a Python framework that gives an LLM agent built-in planning, sub-agent dispatch, a virtual filesystem, and a TODO loop — the patterns popularized by Claude Code and Manus, packaged as a `create_deep_agent(...)` call on top of LangGraph. The kit uses Deep Agents as the brain behind the canvas: a single prompt like "import the workshop leads and draft outreach to the top 5" triggers a multi-step plan that the agent executes tool-by-tool while you watch the cards appear.
+        subgraph Tools_ ["Tools @tool LangChain"]
+            FetchLeads["fetch_notion_leads()"]
+            UpdateLead["update_notion_lead()"]
+            InsertLead["insert_notion_lead()"]
+            FindLead["find_lead()"]
+            PostComment["post_lead_comment()"]
+        end
 
-[More about Deep Agents ->](https://github.com/langchain-ai/deepagents)
+        NotionMCP["notion_mcp.py\nmcp-use wrapper\nspawn npx @notionhq/notion-mcp-server\npor llamada"]
+        LeadStore["lead_store.py\nNotionStore | LocalJsonStore\n50 leads de seed si no hay Notion"]
+    end
 
-### Gemini
+    subgraph Intelligence ["📊 CopilotKit Intelligence (Docker)"]
+        Postgres[("PostgreSQL 16\nhilos · mensajes")]
+        Redis[("Redis 7\ncaché")]
+        AppAPI["app-api :4201"]
+        Gateway["realtime-gateway :4401"]
+    end
 
-Gemini 3.1 Flash-Lite is Google's high-volume workhorse in the Gemini 3 family — fast, cheap, and tool-calling-capable. The kit defaults to **`gemini-3.1-flash-lite`** for chat — pick up an API key from [Google AI Studio](https://aistudio.google.com), drop it into `.env`, and you're done. Need a more reasoning-heavy model? Swap to **Gemini 3 Pro Preview** or **Gemini 3 Flash** with a one-line edit in `apps/agent/src/runtime.py` (`_gemini_llm`). Swapping to OpenAI, Anthropic, or any other LangChain-supported model is also a one-line edit (see [Switching to a different model](dev-docs/model-switching.md)).
+    subgraph MCP ["🔌 MCP Server Desplegable (puerto 3011)"]
+        MCPTools6["6 Tools:\n• show-lead-list\n• show-lead-demand\n• show-lead-pipeline\n• show-canvas-dashboard\n• show-email-draft\n• post-email-comment"]
+    end
 
-[More about Gemini ->](https://ai.google.dev/gemini-api/docs)
+    subgraph External ["☁️ Externo"]
+        NotionAPI["Notion API\nleads database"]
+        GeminiLLM["Gemini 3.1 Flash-Lite\n(default LLM)"]
+        ClaudeAlt["Claude Sonnet 4.6\n(alternativo: 1 env-var)"]
+        ExternalAgents["Claude · ChatGPT\nvía MCP protocol"]
+    end
 
-### A2UI
-
-[A2UI](https://a2ui.org/) is a protocol for agent-driven interfaces — it lets AI agents generate rich, interactive UI that renders natively across web, mobile, and desktop **without executing arbitrary code**. That sandboxed-by-default model pairs well with the kit's generative UI surface: Gemini emits A2UI components, the renderer paints them, and the agent never ships executable code to the client. Browse the [custom catalog](https://a2ui-composer.ag-ui.com/custom-catalog) for component examples.
-
-[More about A2UI ->](https://github.com/google/A2UI)
-
-### Notion MCP (via mcp-use)
-
-The kit ships with a **Notion Leads database demo** wired through the official [Notion MCP server](https://github.com/makenotion/notion-mcp-server) (`@notionhq/notion-mcp-server`), called from Python via [mcp-use](https://manufact.com/mcp-use). MCP is the open protocol for connecting LLMs to tools — Anthropic publishes it, and Notion ships a first-party server. Swap to any other MCP server (Linear, Slack, GitHub, Google Drive, …) by changing one config dict in `apps/agent/src/notion_mcp.py` and updating the prompt's `INTEGRATION_PROMPT`.
-
-[More about MCP ->](https://modelcontextprotocol.io)
-
-### Manufact / mcp-use
-
-The kit's `apps/mcp/` package is an MCP server built with [`mcp-use`](https://manufact.com/mcp-use), an open-source TypeScript framework for building MCP servers and MCP Apps. `npm run dev:mcp` gives you a full development environment with a local Inspector and support for hot reload for quick iteration. Easily deploy the server to Manufact Cloud with `npm run -w mcp deploy`.
-
-[More about Manufact ->](https://manufact.com)
-
-### Daytona
-
-[Daytona](https://www.daytona.io/) is a secure and elastic infrastructure runtime for AI-generated code execution and agent workflows. Sandboxes spin up in under 90ms with full isolation — dedicated kernel, filesystem, network stack, and allocated vCPU/RAM/disk — and run any Python, TypeScript, or JavaScript code. Built on OCI/Docker compatibility with stateful environment snapshots, it's a natural fit when an agent in this kit needs to execute generated code or persist a workspace across sessions. Agents and developers interact with sandboxes programmatically through Daytona's SDKs, API, and CLI.
-
-[More about Daytona ->](https://github.com/daytonaio/daytona)
-
----
-
-## Run it locally
-
-1. Run `npx @copilotkit/cli@latest init` and select **Intelligence** when prompted.
-2. Drop a Gemini API key into **both** `.env` and `apps/agent/.env`. Then follow [Notion setup](#notion-setup) below for the integration token + database id.
-3. Run `npm install` then `npm run dev` (or `npm run dev:full` to include the MCP server).
-
-> `npm run dev` runs a pre-flight check (`scripts/check-env.sh`) before booting anything — it'll fail loudly with a numbered list of any missing keys, an unreachable Notion database, or a Docker daemon that isn't running. Fix what it lists, re-run, and you're off. See [dev-docs/troubleshooting.md](dev-docs/troubleshooting.md) for fixes per failure mode.
-
-Please give us feedback on your experience with it!
-
-### Notion setup
-
-The kit calls Notion through the official [Notion MCP server](https://github.com/makenotion/notion-mcp-server) — a standalone process spawned on demand via `npx -y @notionhq/notion-mcp-server`. Auth is a single Notion integration token plus an explicit per-database share. No global install, no OAuth flow, no third-party broker.
-
-The kit is wired against an "AI Workshop Provider Community" lead-form database. The fastest path is to duplicate the public sample into your own workspace; you can also re-import a CSV/ZIP if you'd rather start from a snapshot.
-
-**1. Get the database into your workspace.**
-
-- *Option A — duplicate the public sample (recommended).* Open the public template: [AI Workshop Provider Community](https://assorted-stomach-b12.notion.site/a274791c4e1e826d882d01562af74de9?v=0e04791c4e1e83ca834988083174d19e&source=copy_link). In the top-right of the page, click the **Duplicate** icon (two overlapping squares, next to the share icon and the `…` menu) and pick a destination workspace — schema, views, and seed rows all come along. Bookmark the URL of the duplicated copy; you'll need its database id in step 3.
-- *Option B — re-import the bundled snapshot.* In Notion, **Settings → Workspace → Import → Notion (CSV/ZIP)** and upload [`data/notion-leads-sample/ai-workshop-provider-community.zip`](data/notion-leads-sample/ai-workshop-provider-community.zip). A quick-look CSV lives next to it at [`ai-workshop-provider-community.csv`](data/notion-leads-sample/ai-workshop-provider-community.csv).
-
-**2. Create an integration and share it with the database.**
-
-1. Go to [notion.so/profile/integrations/internal](https://www.notion.so/profile/integrations/internal) → **New integration** → name it (e.g. "genai-starterkit") → copy the **Internal Integration Token** (starts with `ntn_…` or `secret_…`). Bookmark this page — it's also where you'll come back to rotate the token or audit which databases the integration can see.
-2. Open the duplicated database in Notion. Click the `…` menu in the top-right → **Connections** (count badge will read `0`) → **Add connection** → pick the integration you just created. The panel will flip to **Active connections** with your integration listed.
-
-> Notion's permission model is per-database — a fresh integration token sees zero databases until it's been shared into them. **Forgetting this share step is the most common point of failure.** If `npm run dev` boots cleanly but `Import the leads` fails with "object not found", come back here.
-
-> **Learn more:** Notion's [Getting started with the Notion API](https://developers.notion.com/guides/get-started/overview) covers integration types, the per-database share model, and the API surface the official MCP server wraps.
-
-**3. Paste the credentials into `.env`.**
-
-Pull the database id from the URL of your duplicated copy: it's the 32-char hex string between the workspace slug and the `?v=` query (e.g. `a274791c4e1e826d882d01562af74de9`).
-
-Paste both into `apps/agent/.env` (and `.env` at the repo root):
-
-```bash
-NOTION_TOKEN=<paste the Internal Integration Token>
-NOTION_LEADS_DATABASE_ID=<paste the database id from its Notion URL>
+    Frontend <-->|"proxy /api/copilotkit → :4010"| BFF
+    BFF <-->|"LangGraphAgent recursion_limit=60"| Agent
+    Agent --> Middleware_
+    Middleware_ --> Tools_
+    Tools_ <--> NotionMCP
+    NotionMCP <-->|"MCP tools"| NotionAPI
+    Agent --> GeminiLLM & ClaudeAlt
+    BFF <--> Intelligence
+    Intelligence --> Postgres & Redis
+    MCP <-->|"6 tools con widgets"| ExternalAgents
 ```
 
-**4. Restart the agent.**
+---
+
+## Flujo de Información — Pipeline Completo
+
+Cómo viaja la información desde que el usuario abre el browser hasta que el canvas se actualiza.
+
+```mermaid
+flowchart TD
+    subgraph Boot ["🚀 Boot sequence"]
+        A["npm run dev\ncheck-env.sh valida todas las env vars"]
+        A --> B["docker compose up\nPostgres + Redis + Intelligence"]
+        B --> C["seed-default-user.sh\nusuario por defecto en Postgres"]
+        C --> D["3 procesos en paralelo:\nNext.js :3010\nHono BFF :4010\nLangGraph agent :8133"]
+        D --> E["Agent boot:\n• wipe_orphan_threads()\n• lead_store health check\n• build_system_prompt() con estado integración\n• build_graph() con runtime elegido"]
+    end
+
+    E --> F
+
+    subgraph BrowserOpen ["🌐 Usuario abre el browser"]
+        F["GET http://localhost:3010/leads"]
+        F --> G["CopilotKitProviderShell\napunta a /api/copilotkit (→ BFF :4010)"]
+        G --> H["ThreadsDrawer\ncarga hilos de Intelligence (Postgres)"]
+        H --> I["Primer turno del hilo:\nLeadStateMiddleware detecta state.leads vacío\nauto-hidrata desde LeadStore"]
+        I --> J["Canvas se puebla\nsin que el usuario diga nada"]
+    end
+
+    J --> K
+
+    subgraph ChatMessage ["💬 Usuario envía mensaje"]
+        K["CopilotSidebar\nenvía mensaje + threadId"]
+        K --> L["BFF: CopilotRuntime\nrouta a LangGraphAgent :8133\nrecursion_limit: 60"]
+        L --> M["TimingMiddleware → LeadStateMiddleware\n→ CopilotKitMiddleware"]
+        M --> N["Deep Agent planner (deepagents)\ndescompone en TODO plan\nejecutado paso a paso"]
+    end
+
+    N --> O
+
+    subgraph AgentProcessing ["🤖 Agente procesa la tarea"]
+        O{{"¿Tipo de operación?"}}
+
+        O -->|"Leer leads de Notion"| P["fetch_notion_leads()\n→ notion_mcp.py\nspawn npx @notionhq/notion-mcp-server\n→ API-query-data-source\n→ rows mapeadas a Lead TypedDicts\n→ Command(update=state.leads)"]
+
+        O -->|"Mutar canvas"| Q["Frontend tools via useFrontendTool:\nsetLeads · setFilter · selectLead\nhighlightLeads · renderLeadMiniCard\nrenderEmailDraft\n→ forwarded vía CopilotKit runtime protocol"]
+
+        O -->|"Actualizar Notion"| R["update_notion_lead()\n→ mcp_update_page()\n→ Notion API PATCH\n+ Command(update=state.leads)"]
+    end
+
+    P & Q & R --> S
+
+    subgraph StateSync ["📡 State snapshot → UI"]
+        S["Agente emite STATE_SNAPSHOT events\nvía AG-UI protocol"]
+        S --> T["CopilotRuntime stream → Frontend"]
+        T --> U["React canvas reads agent.state\n(typed as AgentState)"]
+        U --> V["Re-render:\nPipelineBoard actualiza kanban\nQuickStats / StatusDonut / WorkshopDemand\nrecomputan"]
+    end
+```
+
+---
+
+## Flujo de Sincronización con Notion
+
+El agente usa `mcp-use` para comunicarse con Notion sin importar el driver directamente.
+
+```mermaid
+sequenceDiagram
+    participant User as 👤 Usuario
+    participant Agent as LangGraph Agent
+    participant NotionMCP as notion_mcp.py
+    participant MCPServer as @notionhq/notion-mcp-server\n(npx spawned)
+    participant NotionAPI as Notion REST API
+    participant State as state.leads
+
+    User->>Agent: "Muéstrame los leads del Workshop React"
+
+    Agent->>NotionMCP: fetch_notion_leads()
+    NotionMCP->>MCPServer: spawn npx @notionhq/notion-mcp-server\n(con NOTION_TOKEN en env)
+    MCPServer-->>NotionMCP: MCP tools disponibles
+
+    NotionMCP->>MCPServer: API-query-data-source\n{database_id, filter: {workshop: "React"}}
+    MCPServer->>NotionAPI: POST /databases/{id}/query
+    NotionAPI-->>MCPServer: rows paginadas de leads
+    MCPServer-->>NotionMCP: rows en formato MCP
+
+    NotionMCP->>NotionMCP: mapear a Lead TypedDicts\n{id, name, email, status, workshop, ...}
+    NotionMCP-->>Agent: Command(update={"leads": [...]})
+
+    Agent->>State: state.leads actualizado
+    Agent-->>User: STATE_SNAPSHOT → canvas re-renderiza\nPipelineBoard muestra leads filtrados
+```
+
+---
+
+## Flujo HITL — Email Draft
+
+El Human-in-the-Loop del email draft usa un frontend tool con render inline en el chat.
+
+```mermaid
+flowchart TD
+    A(["👤 Usuario: 'Escribe email de seguimiento para Ana García'"]) --> B
+
+    B["Agente identifica lead\nfind_lead(name='Ana García')"]
+    B --> C["renderEmailDraft()\nFrontend tool con render function"]
+    C --> D["EmailDraftCard monta inline en el chat\n{leadId, subject, body}\nEditable por el usuario"]
+
+    D --> E{{"¿Qué hace el usuario?"}}
+
+    E -->|"Edita y hace clic en Send"| F["onSend()\nllama a injectPrompt()\n'Envía email a Ana García:\n  asunto: {subject}\n  cuerpo: {body}'"]
+    E -->|"Hace clic en Discard"| G["EmailDraftCard desmontado\nsin acción"]
+    E -->|"Hace clic en Regenerate"| H["injectPrompt('Regenera el email para Ana García')\nagente genera nueva versión"]
+
+    F --> I["Agente recibe el prompt inyectado"]
+    I --> J["post_lead_comment(leadId, subject, body)\n→ notion_mcp.mcp_create_comment()\n→ Notion API: comment en la página"]
+    J --> K(["✅ Comentario guardado en Notion\nagente confirma al usuario"])
+```
+
+---
+
+## Generative UI — 3 Paradigmas
+
+```mermaid
+graph LR
+    subgraph Controlled ["🎛️ Controlled — useComponent\nMás control · menos flexibilidad"]
+        C1["Desarrollador define\ncomponentes React predefinidos"]
+        C2["Agente elige cuál usar\ny rellena props"]
+        C3["On-brand · pixel-perfect\nideal para workflows repetibles"]
+        C1 --> C2 --> C3
+    end
+
+    subgraph Declarative ["📋 Declarative — A2UI\nBalance control/flexibilidad"]
+        D1["Schema A2UI\nmapea outputs → renderers"]
+        D2["Agente produce JSON\ndescribiendo el layout"]
+        D3["A2UI renderiza\ncomponentes del catálogo"]
+        D1 --> D2 --> D3
+    end
+
+    subgraph OpenEnded ["🌐 Open-ended — MCP Apps / openGenerativeUI\nMáxima flexibilidad"]
+        O1["Agente genera HTML raw\no widget TSX"]
+        O2["Sandbox doble-iframe\naisla el contenido"]
+        O3["Disposable, data-grounded\ninterfaces on the fly"]
+        O1 --> O2 --> O3
+    end
+
+    Controlled -->|"Lead cards\nen el canvas"| App["Esta App"]
+    Declarative -->|"Componentes\nstreamed de Gemini"| App
+    OpenEnded -->|"MCP server\nClaude / ChatGPT"| App
+```
+
+---
+
+## MCP Server Desplegable
+
+```mermaid
+flowchart LR
+    subgraph ExternalAgents ["Agentes Externos"]
+        Claude["Claude Desktop\no claude.ai"]
+        ChatGPT["ChatGPT\ncon MCP support"]
+    end
+
+    subgraph MCPServer ["apps/mcp/ — MCP Server (puerto 3011)"]
+        ShowList["show-lead-list()\n→ widget tabla de leads"]
+        ShowDemand["show-lead-demand()\n→ widget barras por workshop"]
+        ShowPipeline["show-lead-pipeline()\n→ widget pipeline kanban"]
+        ShowDashboard["show-canvas-dashboard()\n→ widget dashboard completo"]
+        ShowEmailDraft["show-email-draft()\n→ widget HITL email"]
+        PostComment["post-email-comment()\n→ comenta en Notion"]
+    end
+
+    subgraph Widgets ["Widgets TSX (resources/)"]
+        W1["canvas-dashboard/widget.tsx"]
+        W2["email-draft/widget.tsx"]
+        W3["lead-demand/widget.tsx"]
+        W4["lead-list/widget.tsx"]
+        W5["lead-pipeline/widget.tsx"]
+    end
+
+    Claude & ChatGPT -->|"MCP tools"| MCPServer
+    ShowList & ShowDemand & ShowPipeline & ShowDashboard --> W1 & W2 & W3 & W4 & W5
+    ShowEmailDraft --> W2
+    PostComment -->|"sin args requeridos"| Claude & ChatGPT
+    W1 & W2 & W3 & W4 & W5 -->|"widget() response\nHTML renderizado"| ExternalAgents
+```
+
+---
+
+## Stack Técnico
+
+| Capa | Tecnología | Detalle |
+|---|---|---|
+| Frontend | Next.js 15 + React 19 + TypeScript | Tailwind CSS v4 · Radix UI · dnd-kit · Recharts |
+| CopilotKit | `@copilotkit/react-core` v2 | CopilotSidebar · useFrontendTool · useAgent · A2UI |
+| BFF | Hono (Node.js) + TypeScript | CopilotRuntime v2 + CopilotKitIntelligence + LangGraphAgent |
+| Agent | Python 3.11+ + LangGraph | deepagents (default) · react-agent (alternativo) |
+| LLM default | Gemini 3.1 Flash-Lite | `langchain-google-genai` |
+| LLM alternativo | Claude Sonnet 4.6 | 1 env-var swap: `AGENT_RUNTIME=claude-sonnet-4-6-react` |
+| Notion | `@notionhq/notion-mcp-server` vía `mcp-use` | spawned como subproceso npx |
+| Intelligence | CopilotKit composite container | Postgres 16 · Redis 7 · threads persistentes |
+| MCP server | `mcp-use/server` TypeScript | 6 tools · deployable a Manufact Cloud |
+| Package mgmt | npm workspaces (frontend/bff/mcp) + uv (Python) | — |
+
+---
+
+## Estructura del Proyecto
+
+```
+Generative-UI-Global-Hackathon-Starter-Kit/
+├── package.json                    # Root npm workspace
+├── .env.example
+├── scripts/
+│   ├── check-env.sh                # Pre-flight: valida env vars
+│   └── seed-default-user.sh        # Crea usuario por defecto en Postgres
+├── deployment/
+│   ├── docker-compose.yml          # Postgres + Redis + Intelligence
+│   └── init-db/01-create-databases.sql
+├── data/
+│   └── notion-leads-sample/        # CSV + ZIP de leads de ejemplo
+├── dev-docs/
+│   ├── architecture.md             # Diagramas de arquitectura
+│   ├── setup.md · model-switching.md · mcp-server.md
+│   └── threads.md · customization.md · demo-prompts.md
+│
+└── apps/
+    ├── frontend/                   # Next.js 15 — puerto 3010
+    │   ├── next.config.ts          # Rewrites /api/copilotkit/* → BFF :4010
+    │   └── src/
+    │       ├── app/leads/page.tsx  # Página principal: canvas + chat + tools
+    │       ├── components/
+    │       │   ├── copilot/        # CopilotKitProviderShell · ToolFallbackCard
+    │       │   ├── leads/          # PipelineBoard · LeadCard · QuickStats
+    │       │   │                   # StatusDonut · WorkshopDemand
+    │       │   ├── leads/inline/   # LeadMiniCard · EmailDraftCard (HITL)
+    │       │   └── threads-drawer/ # Sidebar de hilos persistentes
+    │       └── lib/leads/
+    │           ├── types.ts        # Lead · AgentState · LeadFilter
+    │           ├── optimistic.ts   # applyPatch / revertPatch
+    │           └── derive.ts       # applyFilter · topWorkshop
+    │
+    ├── bff/                        # Hono BFF — puerto 4010
+    │   └── src/server.ts           # CopilotRuntime v2 + LangGraphAgent
+    │
+    ├── agent/                      # Python LangGraph — puerto 8133
+    │   ├── main.py                 # Entry point: build_graph · boot checks
+    │   └── src/
+    │       ├── runtime.py          # build_graph(): 4 runtimes
+    │       ├── prompts.py          # Prompts del agente + integration status
+    │       ├── lead_state.py       # LeadStateMiddleware: auto-hydrate
+    │       ├── lead_store.py       # NotionStore | LocalJsonStore
+    │       ├── notion_mcp.py       # mcp-use facade
+    │       ├── notion_tools.py     # @tool definitions
+    │       └── canvas.py           # Stubs del contrato de frontend tools
+    │
+    └── mcp/                        # MCP Server desplegable — puerto 3011
+        ├── index.ts                # 6 tools con widget responses
+        └── resources/              # Widget TSX por tool
+```
+
+---
+
+## Instalación y Setup
+
+### Prerrequisitos
+
+- Node.js 18+ · npm · Python 3.11+ · uv (Python package manager) · Docker Desktop
+
+### 1. Variables de entorno
 
 ```bash
+cp .env.example .env
+```
+
+Variables mínimas requeridas:
+
+| Variable | Descripción |
+|---|---|
+| `GOOGLE_API_KEY` | API key de Google Gemini (LLM default) |
+| `ANTHROPIC_API_KEY` | API key de Anthropic Claude (opcional — si usas runtime claude) |
+| `COPILOTKIT_CLOUD_PUBLIC_API_KEY` | API key de CopilotKit Intelligence |
+| `NOTION_TOKEN` | Token de integración de Notion (opcional) |
+| `NOTION_DATABASE_ID` | ID de la database de leads en Notion (opcional) |
+
+### 2. Iniciar infraestructura
+
+```bash
+# Postgres + Redis + CopilotKit Intelligence
+docker compose -f deployment/docker-compose.yml up -d
+
+# Crear usuario por defecto
+bash scripts/seed-default-user.sh
+```
+
+### 3. Instalar dependencias
+
+```bash
+# Frontend + BFF + MCP (npm workspaces)
+npm install
+
+# Agent (Python)
+cd apps/agent
+uv sync
+```
+
+### 4. Levantar los servicios
+
+```bash
+# Todo en paralelo (recomendado)
 npm run dev
+
+# O por separado:
+npm run dev --workspace=apps/frontend   # :3010
+npm run dev --workspace=apps/bff         # :4010
+cd apps/agent && langgraph dev --port 8133
 ```
 
-Then try: **"Import the workshop leads."**
-
-> Need the manual / Docker-free path, or want to swap Notion for a different MCP server (Linear, Slack, GitHub, …)? See [dev-docs/setup.md](dev-docs/setup.md).
-
----
-
-## Vibe coding
-
-The kit ships with skills pre-installed for Cursor, Claude Code, and any agent reading `.agent/`. Open the project in your coding tool and they're picked up automatically — no extra setup. They teach your coding agent CopilotKit's v2 API surface, MCP server / MCP App authoring patterns, and this kit's own conventions.
-
-```
-.
-├── .agent/skills/   ← agent-tool-agnostic (read by any agent following the AGENTS.md convention)
-├── .claude/skills/  ← Claude Code
-└── .cursor/skills/  ← Cursor
-```
-
-Each directory carries the same set of 11 skills:
-
-- **CopilotKit (8):** `copilotkit-{setup, develop, integrations, debug, upgrade, contribute, agui, self-update}` — from [CopilotKit/skills](https://github.com/CopilotKit/skills).
-- **MCP (3):** `mcp-builder`, `mcp-apps-builder`, `chatgpt-app-builder` — from the Manufact reference. They cover authoring an MCP server (the open protocol Anthropic publishes for wiring LLMs to external tools — the same protocol the kit's Notion integration uses) and packaging it as an MCP App that runs natively in Claude or ChatGPT.
-
-To **update** the CopilotKit skills to the latest upstream:
+### 5. (Opcional) Levantar MCP Server
 
 ```bash
-npx skills add copilotkit/skills --full-depth -y
+npm run dev --workspace=apps/mcp        # :3011
 ```
 
-### Connect to the CopilotKit docs MCP server
-
-CopilotKit also exposes a hosted MCP server that gives your coding agent live access to the latest CopilotKit reference material — handy when the checked-in skills lag upstream or you want to ask the docs questions interactively.
-
-**MCP endpoint:** `https://mcp.copilotkit.ai/mcp`
-
-**Claude Web** (Anthropic's web app — attaches MCP servers via Connectors):
-
-1. Open [Claude](https://claude.ai/), click your user in the bottom-left of the chat box, and select **Settings**.
-2. In the left-hand menu, select **Connectors** (or jump straight to the [Connectors settings page](https://claude.ai/settings/connectors)).
-3. Click **Add custom connector**.
-4. **Name:** `CopilotKit`
-5. **URL:** `https://mcp.copilotkit.ai/mcp`
-6. Click **Add**.
-
-Setup for Claude Code, Cursor, ChatGPT, and other coding agents is documented at [docs.copilotkit.ai/coding-agents](https://docs.copilotkit.ai/coding-agents).
-
-Reference docs: [CopilotKit Coding Agents](https://docs.copilotkit.ai/coding-agents) · [CopilotKit Skills repo](https://github.com/CopilotKit/skills) · [Agent Skills standard](https://agentskills.io).
+**Acceder a la app:** http://localhost:3010
 
 ---
 
-## Documentation
+## Puertos de Referencia
 
-Deeper guides live in [`dev-docs/`](dev-docs/):
-
-- [Setup](dev-docs/setup.md) · [Model switching](dev-docs/model-switching.md) · [MCP server](dev-docs/mcp-server.md)
-- [Architecture](dev-docs/architecture.md) · [Customization](dev-docs/customization.md) · [Threads / Intelligence](dev-docs/threads.md)
-- [Scripts](dev-docs/scripts.md) · [Demo prompts](dev-docs/demo-prompts.md) · [Troubleshooting](dev-docs/troubleshooting.md)
-
-## License
-
-MIT.
+| Servicio | Puerto |
+|---|---|
+| Next.js frontend | 3010 |
+| Hono BFF | 4010 |
+| LangGraph agent | 8133 |
+| MCP server (Manufact) | 3011 |
+| Intelligence app-api | 4201 |
+| Intelligence realtime-gateway | 4401 |
+| PostgreSQL | 5436 (default) |
+| Redis | 6382 (default) |
 
 ---
 
-> Built for the Generative UI Global Hackathon: Agentic Interfaces.
+## Customización Rápida
+
+| Quiero... | Archivo a editar |
+|---|---|
+| Cambiar el LLM | `.env` → `AGENT_RUNTIME=claude-sonnet-4-6-react` |
+| Agregar un frontend tool | `apps/frontend/src/app/leads/page.tsx` → `useFrontendTool()` |
+| Cambiar fuente de datos | `apps/agent/src/lead_store.py` → implementar `LeadStore` protocol |
+| Agregar tool al agente | `apps/agent/src/notion_tools.py` → `@tool` decorator |
+| Agregar tool al MCP server | `apps/mcp/index.ts` → nuevo `server.tool()` + widget en `resources/` |
+| Personalizar el prompt | `apps/agent/src/prompts.py` → `LEAD_TRIAGE_PROMPT` |
+
+---
+
+## Fork vs. Upstream
+
+Este fork es de `jerelvelarde/Generative-UI-Global-Hackathon-Starter-Kit` creado el 09/05/2026.
+
+La app de ejemplo gestiona leads de un workshop usando Notion como backend y demuestra los 3 paradigmas de Generative UI. Para adaptarla a tu caso de uso, reemplaza la capa de Notion por cualquier otra fuente de datos vía MCP, y los componentes `Lead*` por tus propias entidades.
+
+---
+
+*Generative UI Global Hackathon: Agentic Interfaces · CopilotKit · 2026*
